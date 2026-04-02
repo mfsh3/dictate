@@ -1,25 +1,57 @@
 # Dictate — Whisper Speech-to-Text
 
 ## Was ist das?
-Eine einzige HTML-Datei (24 KB) die als Browser-basiertes Sprach-Diktierwerkzeug funktioniert. Nutzt die OpenAI Whisper API zur Transkription. Läuft als Picture-in-Picture Popup das über anderen Fenstern schwebt.
+Browser-basiertes Sprach-Diktierwerkzeug. Nutzt die OpenAI Whisper API zur Transkription. Zwei Varianten: Desktop (PiP-Popup) und Mobile (PWA für iOS).
 
-## Datei
+## Dateien
 ```
-dictate.html    ← Die komplette App (HTML + CSS + JS, alles inline)
+dictate.html          ← Desktop-App (PiP, Chrome/Edge 116+)
+dictate-mobile.html   ← Mobile PWA (iOS, Fullscreen)
+manifest.json         ← PWA Manifest (Icons, Display-Mode)
+sw.js                 ← Service Worker (Offline-Cache)
+icon-192.png          ← App-Icon 192x192
+icon-512.png          ← App-Icon 512x512
 ```
+
+## Hosting
+GitHub Pages: `https://mfsh3.github.io/dictate/`
+- HTTPS automatisch (nötig für Mikrofon + Clipboard + PWA)
+- Aktiviert über Settings → Pages → Source: main
 
 ## Benutzung
-1. `dictate.html` in Chrome/Edge öffnen (direkt oder via localhost)
+
+### Desktop
+1. `dictate.html` in Chrome/Edge öffnen
 2. API Key eingeben, Sprache wählen
 3. "Dictate starten" → PiP-Popup öffnet sich (always-on-top)
-4. **Space** oder Klick auf den Record-Button → diktieren → **Space** → Text wird transkribiert und automatisch ins Clipboard kopiert
-5. In Ziel-App wechseln → **Ctrl+V**
+4. **Space** oder Klick → diktieren → **Space** → Text wird transkribiert + auto-kopiert
+5. In Ziel-App → **Ctrl+V**
+
+### Mobile (iOS)
+1. `mfsh3.github.io/dictate/dictate-mobile.html` in Safari öffnen
+2. Share → "Zum Home-Bildschirm" (einmalig)
+3. App öffnen, API Key eingeben
+4. Record-Button tippen → diktieren → Stop tippen
+5. **Kopieren-Button tippen** → in Ziel-App wechseln → Einfügen
+   (kein Auto-Copy auf iOS — Clipboard-API erlaubt es nur im direkten Tap-Handler)
 
 ## Architektur
-- **Setup Page:** Hauptseite im Browser-Tab — API Key + Sprache konfigurieren, Mikrofon anfordern
-- **PiP Widget:** Wird per `documentPictureInPicture` API als Floating-Fenster geöffnet. Das Widget-DOM wird komplett frisch per `createElement` aufgebaut (kein innerHTML, kein DOM-Move zwischen Fenstern)
-- **Fallback:** Wenn PiP nicht verfügbar ist, wird das Widget inline unter dem Setup gerendert
+
+### Desktop (`dictate.html`)
+- **Setup Page:** API Key + Sprache konfigurieren, Mikrofon anfordern
+- **PiP Widget:** `documentPictureInPicture` API, DOM frisch per `createElement` aufgebaut
+- **Fallback:** Wenn PiP nicht verfügbar → Widget inline
+- **Auto-Copy:** Transkription geht automatisch ins Clipboard
+
+### Mobile (`dictate-mobile.html`)
+- **Single-View:** Kein Setup-Screen, alles in einer View (Settings als Toggle-Panel)
+- **Fullscreen PWA:** `display: standalone`, kein Safari-UI
+- **Zwei-Tap-Copy:** Expliziter Kopieren-Button (iOS-Clipboard-Limitation)
+- **Safe Areas:** `env(safe-area-inset-*)` für Notch/Dynamic Island
+
+### Gemeinsam
 - **State:** Alles in `localStorage` (Keys: `dc_k` = API Key, `dc_l` = Sprache, `dc_c` = Kosten)
+- **Kein Build-System:** Alles inline (HTML + CSS + JS), keine externen Dependencies außer Google Fonts
 
 ## Design System: "Sonic Architect"
 - Farbpalette: Deep Black (#0e0e0f) + Electric Purple (#b6a0ff / #7e51ff)
@@ -38,9 +70,18 @@ dictate.html    ← Die komplette App (HTML + CSS + JS, alles inline)
 - SVG Icons: Mic, Stop, Wait — inline erzeugt per `createElementNS`
 
 ## Einschränkungen
-- Kein globaler Hotkey (Browser-Limitation) — Space funktioniert nur im Widget-Fenster
+
+### Desktop
+- Kein globaler Hotkey — Space funktioniert nur im Widget-Fenster
 - PiP braucht Chrome/Edge 116+
-- Mikrofon-Zugriff braucht Secure Context (localhost oder HTTPS). Direkte `file://` URLs funktionieren in Firefox, in Chrome/Edge ggf. nicht
+- Mikrofon braucht Secure Context (localhost oder HTTPS)
+
+### Mobile
+- Kein Auto-Copy (iOS-Clipboard-API nur im User-Gesture-Handler)
+- `MediaRecorder` braucht iOS 14.3+
+- Whisper-API braucht Internet (kein Offline-Transkription)
+
+### Allgemein
 - Auf Firmenrechnern: .exe und PowerShell-Scripts können geblockt sein — diese HTML-Lösung umgeht das
 
 ## Vorgeschichte
