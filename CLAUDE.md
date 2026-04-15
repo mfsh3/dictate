@@ -25,7 +25,12 @@ GitHub Pages: `https://mfsh3.github.io/dictate/`
 2. API Key eingeben, Sprache wählen
 3. "Dictate starten" → PiP-Popup öffnet sich (always-on-top)
 4. **Space** oder Klick → diktieren → **Space** → Text wird transkribiert + auto-kopiert
-5. In Ziel-App → **Ctrl+V**
+5. Weitere Diktate appenden (newline-separiert) an die laufende Session
+6. **Escape** oder **× Button** → Aufnahme abbrechen (kein API-Call, keine Kosten)
+7. **🗑 Leeren** → aktuelle Session in History schieben, frische Session starten
+8. **◀ Live/n/10 ▶** → durch die letzten 10 Sessions navigieren
+9. Textbox ist editierbar — Änderungen werden im aktuellen Buffer oder im History-Eintrag persistiert
+10. In Ziel-App → **Ctrl+V**
 
 ### Mobile (iOS)
 1. `mfsh3.github.io/dictate/dictate-mobile.html` in Safari öffnen
@@ -41,7 +46,9 @@ GitHub Pages: `https://mfsh3.github.io/dictate/`
 - **Setup Page:** API Key + Sprache konfigurieren, Mikrofon anfordern
 - **PiP Widget:** `documentPictureInPicture` API, DOM frisch per `createElement` aufgebaut
 - **Fallback:** Wenn PiP nicht verfügbar → Widget inline
-- **Auto-Copy:** Transkription geht automatisch ins Clipboard
+- **Auto-Copy:** Transkription geht automatisch ins Clipboard (kompletter Session-Buffer, nicht nur der neue Schnipsel)
+- **State-Modell:** `current` = aktiver Session-Buffer (wächst per Append), `hist[]` = bis zu 10 abgeschlossene Sessions, `histIdx` = Anzeige-Position (`-1` = Live). **Wichtig:** Variable heißt `hist`, nicht `history` — `window.history` ist [Unforgeable] und schluckt jede `var history` Deklaration
+- **Cancel:** Während Aufnahme neutralisiert `cancelR()` `mediaRec.onstop` bevor `mediaRec.stop()` aufgerufen wird → `transcribe()` feuert nicht, `chunks[]` werden verworfen
 
 ### Mobile (`dictate-mobile.html`)
 - **Single-View:** Kein Setup-Screen, alles in einer View (Settings als Toggle-Panel)
@@ -50,7 +57,7 @@ GitHub Pages: `https://mfsh3.github.io/dictate/`
 - **Safe Areas:** `env(safe-area-inset-*)` für Notch/Dynamic Island
 
 ### Gemeinsam
-- **State:** Alles in `localStorage` (Keys: `dc_k` = API Key, `dc_l` = Sprache, `dc_c` = Kosten)
+- **State:** Alles in `localStorage` (Keys: `dc_k` = API Key, `dc_l` = Sprache, `dc_c` = Kosten, `dc_h` = Session-History JSON-Array, max. 10 Einträge, newest first — nur Desktop)
 - **Kein Build-System:** Alles inline (HTML + CSS + JS), keine externen Dependencies außer Google Fonts
 
 ## Design System: "Sonic Architect"
@@ -67,7 +74,7 @@ GitHub Pages: `https://mfsh3.github.io/dictate/`
 - Clipboard: `navigator.clipboard.writeText()` mit `execCommand('copy')` Fallback
 - Hotkey: Space-Taste (nur wenn PiP/Widget fokussiert, kein globaler Hotkey)
 - Kosten: $0.006/Minute, getrackt pro Session/Tag/Gesamt
-- SVG Icons: Mic, Stop, Wait — inline erzeugt per `createElementNS`
+- SVG Icons: Mic, Stop, Wait, X — inline erzeugt per `createElementNS`
 
 ## Einschränkungen
 
@@ -80,6 +87,7 @@ GitHub Pages: `https://mfsh3.github.io/dictate/`
 - Kein Auto-Copy (iOS-Clipboard-API nur im User-Gesture-Handler)
 - `MediaRecorder` braucht iOS 14.3+
 - Whisper-API braucht Internet (kein Offline-Transkription)
+- Cancel / Session-Append / History / Editable Textbox: **nur Desktop**, Mobile hinkt dem Modell hinterher
 
 ### Allgemein
 - Auf Firmenrechnern: .exe und PowerShell-Scripts können geblockt sein — diese HTML-Lösung umgeht das
