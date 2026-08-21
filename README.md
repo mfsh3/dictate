@@ -78,6 +78,8 @@ Vor dem Umschalten von Mock auf RadsUp müssen Admin-/Nicht-Admin, falsches/abge
 
 ## Deployment
 
+> **Temporärer Dev-Betrieb (seit 2026-08-21):** Für den ersten MVP-Smoke verwendet Dictate den bereits vorhandenen RadsUp-Dev-OpenAI-Key. Vor der MVP-Abnahme muss er durch ein eigenes Dictate-Dev-Projekt mit separatem Key und hartem Monatslimit von 25 USD ersetzt werden.
+
 1. Das OpenAI-Dev-Projekt extern auf ein hartes Monatslimit von 25 USD setzen.
 2. `/opt/dictate-state/dev` mit Eigentümer des Container-Users und Modus `0700` vorbereiten.
 3. das aktuelle RadsUp-Dev-CA-/Self-Signed-Zertifikat als `radsup-dev-ca.pem` ablegen.
