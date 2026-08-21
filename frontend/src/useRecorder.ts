@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const MIN_MS = 300, ROLLOVER_MS = 90_000, SILENCE_MS = 60_000;
+const AUDIO_CONSTRAINTS: MediaTrackConstraints = { channelCount: 1, echoCancellation: true, noiseSuppression: true };
 
 function supportedMime() {
   const candidates = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"];
@@ -12,9 +13,15 @@ function isTextTarget(target: EventTarget | null) {
   return !!element && (element.tagName === "INPUT" || element.tagName === "TEXTAREA" || element.tagName === "SELECT" || element.isContentEditable);
 }
 
+function errorMessage(error: unknown) {
+  if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") return error.message;
+  return "Mikrofonzugriff fehlgeschlagen";
+}
+
 export function useRecorder(onSegment: (blob: Blob, durationMs: number) => void, onError: (message: string) => void, disabled: boolean) {
   const [recording, setRecording] = useState(false);
   const [level, setLevel] = useState(0);
+  const [microphoneState, setMicrophoneState] = useState<"unknown" | "ready" | "error">("unknown");
   const streamRef = useRef<MediaStream | null>(null), recorderRef = useRef<MediaRecorder | null>(null);
   const wantedRef = useRef(false), startedRef = useRef(0), chunksRef = useRef<Blob[]>([]);
   const rolloverRef = useRef<number | undefined>(undefined), monitorRef = useRef<number | undefined>(undefined), lastSoundRef = useRef(0);
@@ -56,8 +63,9 @@ export function useRecorder(onSegment: (blob: Blob, durationMs: number) => void,
     if (disabled || wantedRef.current) return;
     wantedRef.current = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: AUDIO_CONSTRAINTS });
       if (disabled || !wantedRef.current) { stream.getTracks().forEach((track) => track.stop()); return; }
+      setMicrophoneState("ready");
       streamRef.current = stream; setRecording(true); lastSoundRef.current = performance.now();
       stream.getAudioTracks().forEach((track) => track.addEventListener("ended", stop, { once: true }));
       beginSegment(stream);
@@ -71,8 +79,18 @@ export function useRecorder(onSegment: (blob: Blob, durationMs: number) => void,
         if (rms > 0.015) lastSoundRef.current = performance.now();
         if (performance.now() - lastSoundRef.current >= SILENCE_MS) stop();
       }, 125);
-    } catch (error) { wantedRef.current = false; onError(error instanceof Error ? error.message : "Mikrofonzugriff fehlgeschlagen"); }
+    } catch (error) { wantedRef.current = false; setMicrophoneState("error"); onError(errorMessage(error)); }
   }, [beginSegment, disabled, onError, stop]);
+
+  const prepare = useCallback(async () => {
+    if (disabled) return false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: AUDIO_CONSTRAINTS });
+      stream.getTracks().forEach((track) => track.stop()); setMicrophoneState("ready"); return true;
+    } catch (error) {
+      setMicrophoneState("error"); onError(errorMessage(error)); return false;
+    }
+  }, [disabled, onError]);
 
   useEffect(() => {
     const down = (event: KeyboardEvent) => {
@@ -85,5 +103,5 @@ export function useRecorder(onSegment: (blob: Blob, durationMs: number) => void,
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("pagehide", leave); leave(); };
   }, [disabled, start, stop]);
 
-  return { recording, level, start, stop, toggle: recording ? stop : start };
+  return { recording, level, microphoneState, prepare, start, stop, toggle: recording ? stop : start };
 }

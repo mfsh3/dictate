@@ -10,4 +10,5 @@ RUN npm run build --workspace @dictate/frontend
 FROM nginx:1.29-alpine
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
+COPY icon-192.png icon-512.png /usr/share/nginx/html/
 EXPOSE 8080

@@ -3,6 +3,7 @@ import { api, ApiError } from "./api";
 import { LoginOverlay } from "./LoginOverlay";
 import { PipControls } from "./PipControls";
 import { Dashboard } from "./Dashboard";
+import { MobileRecordControl } from "./MobileRecordControl";
 import { clampFontSize, orderDictates } from "./dictates";
 import { useRecorder } from "./useRecorder";
 import type { Dictate, Profile, Segment, Settings, Usage } from "./types";
@@ -11,6 +12,7 @@ import { appendTranscript, nextProcessable } from "./queue";
 const DEFAULT_SETTINGS: Settings = { profile: "de-general", dictionary: "", radiologyPack: true };
 const EMPTY_USAGE: Usage = { month: "", audioSeconds: 0, lunaInputTokens: 0, lunaCachedTokens: 0, lunaOutputTokens: 0, audioCost: 0, lunaCost: 0 };
 const FONT_SIZE_KEY = "dictate_editor_font_size";
+const MOBILE_MIC_KEY = "dictate_mobile_microphone_onboarded";
 const MIN_FONT_SIZE = 13, MAX_FONT_SIZE = 25, DEFAULT_FONT_SIZE = 17;
 // A page reload loses its in-memory sequence counter and queue. Give every page
 // instance a fresh id so sequence 0 can never address an earlier page's request.
@@ -27,6 +29,7 @@ export default function App() {
   const [currentId, setCurrentId] = useState<string>(crypto.randomUUID()), [createdAt, setCreatedAt] = useState(new Date().toISOString());
   const [text, setText] = useState(""), [queue, setQueue] = useState<Segment[]>([]), [usage, setUsage] = useState(EMPTY_USAGE);
   const [notice, setNotice] = useState("Bereit · Leertaste halten oder klicken"), [quota, setQuota] = useState(false);
+  const [mobileMicOnboarded, setMobileMicOnboarded] = useState(() => localStorage.getItem(MOBILE_MIC_KEY) === "1");
   const [fontSize, setFontSize] = useState(() => {
     const stored = Number(localStorage.getItem(FONT_SIZE_KEY));
     return Number.isFinite(stored) && stored >= MIN_FONT_SIZE && stored <= MAX_FONT_SIZE ? stored : DEFAULT_FONT_SIZE;
@@ -53,7 +56,7 @@ export default function App() {
     setQueue((items) => [...items, next]); setNotice("Abschnitt in Warteschlange");
   }, [currentId, settings.profile]);
   const recorderError = useCallback((message: string) => setNotice(`Mikrofon: ${message}`), []);
-  const { recording, level, toggle, start, stop } = useRecorder(addSegment, recorderError, !authenticated || quota);
+  const { recording, level, microphoneState, prepare, toggle, start, stop } = useRecorder(addSegment, recorderError, !authenticated || quota);
 
   useEffect(() => {
     if (!authenticated || processing.current) return;
@@ -178,11 +181,11 @@ export default function App() {
       </section>
       <aside className={`side-panel ${historyOpen || settingsOpen ? "open" : ""}`}>
         {historyOpen && <><div className="panel-title"><h2>Verlauf</h2><span>30 Tage</span></div><button className="new" disabled={recording || !!pending.length} onClick={() => void newDictate()}>＋ Neues Diktat</button><div className="history-list">{history.map((item) => <button key={item.id} disabled={recording || !!pending.length} className={item.id === currentId ? "selected" : ""} onClick={() => void openDictate(item)}><strong>{item.title}</strong><span>{new Date(item.updatedAt).toLocaleString("de-DE")}</span></button>)}{!history.length && <p className="empty">Noch keine gespeicherten Diktate.</p>}</div></>}
-        {settingsOpen && <><div className="panel-title"><h2>Einstellungen</h2></div><label>Profil<select value={settings.profile} onChange={(event) => setSettings({ ...settings, profile: event.target.value as Profile })}><option value="de-general">DE · Alltag</option><option value="en-general">EN · Alltag</option><option value="de-radiology">DE · Radiologie</option></select></label><label>Persönliches Wörterbuch<textarea value={settings.dictionary} onChange={(event) => setSettings({ ...settings, dictionary: event.target.value })} placeholder={"Begriff\ngehört => Schreibweise"} /></label><small>Ein Eintrag pro Zeile. &lt;, &gt; und Zeilenumbrüche innerhalb eines Eintrags sind nicht erlaubt.</small><label className="check"><input type="checkbox" checked={settings.radiologyPack} disabled={settings.profile !== "de-radiology"} onChange={(event) => setSettings({ ...settings, radiologyPack: event.target.checked })} /> Radiologie-Grundpaket aktivieren</label><button className="primary" onClick={() => void saveSettings()}>Speichern</button></>}
+        {settingsOpen && <><div className="panel-title"><h2>Einstellungen</h2></div><div className="mobile-review-menu"><span>Text überarbeiten</span><button className="ghost" onClick={() => void beginReview("spelling")}>✨ Rechtschreibung</button><button className="ghost" onClick={() => void beginReview("fillers")}>✨ Füllwörter</button></div><label>Profil<select value={settings.profile} onChange={(event) => setSettings({ ...settings, profile: event.target.value as Profile })}><option value="de-general">DE · Alltag</option><option value="en-general">EN · Alltag</option><option value="de-radiology">DE · Radiologie</option></select></label><label>Persönliches Wörterbuch<textarea value={settings.dictionary} onChange={(event) => setSettings({ ...settings, dictionary: event.target.value })} placeholder={"Begriff\ngehört => Schreibweise"} /></label><small>Ein Eintrag pro Zeile. &lt;, &gt; und Zeilenumbrüche innerhalb eines Eintrags sind nicht erlaubt.</small><label className="check"><input type="checkbox" checked={settings.radiologyPack} disabled={settings.profile !== "de-radiology"} onChange={(event) => setSettings({ ...settings, radiologyPack: event.target.checked })} /> Radiologie-Grundpaket aktivieren</label><button className="primary" onClick={() => void saveSettings()}>Speichern</button><div className="mobile-install-hint"><strong>Als App installieren</strong><span>In Safari auf „Teilen“ und dann „Zum Home-Bildschirm“ tippen.</span></div></>}
       </aside>
       </>}
     </main>
-    {view === "dictate" && <div className="record-dock"><div className="meter"><i style={{ transform: `scaleY(${Math.max(.1, Math.min(1, level * 20))})` }} /><i style={{ transform: `scaleY(${Math.max(.1, Math.min(1, level * 14))})` }} /><i style={{ transform: `scaleY(${Math.max(.1, Math.min(1, level * 24))})` }} /></div><button className={`record ${recording ? "on" : ""}`} disabled={quota || !authenticated} onClick={() => void toggle()}>{recording ? "■" : "●"}</button><span>{quota ? "Projektlimit erreicht" : recording ? "Loslassen / klicken zum Stoppen" : "Leertaste halten"}</span></div>}
+    {view === "dictate" && <><div className="record-dock desktop-record"><div className="meter"><i style={{ transform: `scaleY(${Math.max(.1, Math.min(1, level * 20))})` }} /><i style={{ transform: `scaleY(${Math.max(.1, Math.min(1, level * 14))})` }} /><i style={{ transform: `scaleY(${Math.max(.1, Math.min(1, level * 24))})` }} /></div><button className={`record ${recording ? "on" : ""}`} disabled={quota || !authenticated} onClick={() => void toggle()}>{recording ? "■" : "●"}</button><span>{quota ? "Projektlimit erreicht" : recording ? "Loslassen / klicken zum Stoppen" : "Leertaste halten"}</span></div><MobileRecordControl recording={recording} disabled={quota || !authenticated} level={level} queueCount={pending.length} needsOnboarding={!!authenticated && (!mobileMicOnboarded || microphoneState === "error")} onPrepare={prepare} onPrepared={() => { localStorage.setItem(MOBILE_MIC_KEY, "1"); setMobileMicOnboarded(true); }} onStart={start} onStop={stop} /></>}
     {pending.length > 0 && <div className="queue-card"><strong>Audio-Warteschlange · {pending.length}</strong>{pending.map((item) => <div key={item.id}><span>Abschnitt {item.sequence + 1} · {Math.round(item.durationMs / 1000)} s · {item.status}</span>{item.error && <em>{item.error}</em>}<span className="queue-actions">{item.status === "failed" && <button onClick={() => retry(item.id)}>Erneut senden</button>}<button onClick={() => download(item)}>Audio laden</button></span></div>)}</div>}
     {review && <div className="overlay"><div className="review-card"><h2>Überarbeitung</h2><div className="compare"><label>Original<textarea readOnly value={review.original} /></label><label>Vorschau<textarea readOnly value={review.preview ?? "Überarbeitung läuft …"} /></label></div><div className="review-actions"><button className="ghost" onClick={() => setReview(null)}>Verwerfen</button><button className="primary" disabled={!review.preview} onClick={() => { if (review.preview) setText(review.preview); setReview(null); }}>Übernehmen</button></div></div></div>}
     {!authenticated && <LoginOverlay reason={loginReason} onSuccess={() => void loadAccount()} />}

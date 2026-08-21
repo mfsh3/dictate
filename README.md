@@ -13,10 +13,17 @@ Die früheren statischen Dateien `dictate.html` und `dictate-mobile.html` bleibe
 - persönliches Wörterbuch (`Begriff` oder `gehört => Schreibweise`) und Radiologie-Grundpaket
 - editierbarer Text, verschlüsselter 30-Tage-Verlauf, manuelles und Best-Effort-Auto-Copy
 - PiP-Steuerung in unterstützten Chromium-Browsern
+- installierbare iPhone-PWA mit Safe-Area-Layout, einmaligem Mikrofon-Onboarding und Halten/Hochschieben-Aufnahmegeste
 - manuelle Luna-Überarbeitung mit Original/Vorschau und Übernehmen/Verwerfen
 - geschätzte Transcribe- sowie anhand der API-Nutzung berechnete Luna-Kosten
 
-Nicht enthalten sind Realtime-Transkription, Mobile-Support, globale Betriebssystem-Hotkeys, Prisma, Admin-UI und Backups.
+Nicht enthalten sind Realtime-Transkription, verbindliche Android-Abnahme, globale Betriebssystem-Hotkeys, Prisma, Admin-UI und Backups.
+
+## iPhone-PWA
+
+Auf dem iPhone `https://dictate.radsup.de` in Safari öffnen und über **Teilen → Zum Home-Bildschirm** installieren. Die Mikrofonfreigabe wird einmal von iOS für die Website erteilt und bei späteren Starts wiederverwendet, solange sie nicht in den Safari-Website-Einstellungen widerrufen wird.
+
+Der mobile Aufnahmebutton arbeitet wie bei einer Messenger-App: gedrückt halten nimmt auf, Loslassen stoppt und Hochschieben verriegelt die Aufnahme. API-Antworten, Sitzungen, Diktattexte und Audio werden niemals vom Service Worker gecacht; offline steht nur die App-Oberfläche zur Verfügung. Die frühere `dictate-mobile.html` bleibt eine nicht angebundene Legacy-Version.
 
 ## Lokale Entwicklung
 
@@ -100,6 +107,7 @@ Nach Infrastrukturänderungen sind Dictate, RadsUp und Kasm zu prüfen. Ein Wech
 - 90-Sekunden-Rollover, 60-Sekunden-Stille, Queue-Reihenfolge, Retry und Idempotenz
 - Projektlimit mitten in einer Queue; Blob bleibt download- und retryfähig
 - Clipboard-Erfolg sowie erwarteter `NotAllowedError`
+- iPhone Safari und installierte PWA: erste Mikrofonfreigabe, Neustart ohne erneuten Hinweis, Halten/Loslassen und Hochschieben zum Verriegeln
 - maximal gültiger Upload ohne Nginx-Tempfile
 - mehrere anonymisierte reale DE-, EN- und Radiologieläufe auf `dictate.radsup.de`
 
