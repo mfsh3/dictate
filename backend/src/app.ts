@@ -4,6 +4,7 @@ import helmet from "helmet";
 import multer from "multer";
 import { ZodError } from "zod";
 import { isIP } from "node:net";
+import { createHash } from "node:crypto";
 import type { Config } from "./config.js";
 import type { AuthedRequest } from "./types.js";
 import { AuthService } from "./auth.js";
@@ -86,7 +87,10 @@ export function createApp({ config, store, auth, openai }: Dependencies) {
     const mime = request.file.mimetype.split(";")[0]?.toLowerCase() ?? "";
     if (!allowedAudio.has(mime)) return response.status(415).json({ error: { code: "AUDIO_TYPE", message: "Nicht unterstütztes Audioformat." } });
 
-    const reservation = store.reserve(userId, fields.clientId, fields.sequence);
+    const requestFingerprint = createHash("sha256").update(request.file.buffer)
+      .update(`\0${fields.profile}\0${fields.durationMs}\0${fields.previous}`).digest("hex").slice(0, 32);
+    const idempotencyClientId = `${fields.clientId}:${requestFingerprint}`;
+    const reservation = store.reserve(userId, idempotencyClientId, fields.sequence);
     if (reservation.status === "done") return response.json({ text: reservation.response, duplicate: true, usage: store.usage(userId) });
     if (reservation.status === "processing") return response.status(409).json({ error: { code: "IN_PROGRESS", message: "Dieser Abschnitt wird bereits verarbeitet." } });
 
@@ -97,10 +101,10 @@ export function createApp({ config, store, auth, openai }: Dependencies) {
         profile: fields.profile, dictionary: settings.dictionary, radiologyPack: settings.radiologyPack, previous: fields.previous
       });
       store.addAudioUsage(userId, fields.durationMs / 1000);
-      store.complete(userId, fields.clientId, fields.sequence, text);
+      store.complete(userId, idempotencyClientId, fields.sequence, text);
       response.json({ text, duplicate: false, usage: store.usage(userId) });
     } catch (error) {
-      store.release(userId, fields.clientId, fields.sequence);
+      store.release(userId, idempotencyClientId, fields.sequence);
       throw error;
     }
   }));

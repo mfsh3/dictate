@@ -89,6 +89,14 @@ describe("sessions and API", () => {
     expect(item.store.usage(first.body.userId ?? (item.store.db.prepare("SELECT id FROM users LIMIT 1").get() as { id: string }).id).audioSeconds).toBe(1); item.store.close();
   });
 
+  it("never replays old text when a page reuses a sequence for different audio", async () => {
+    const item = fixture(); const cookie = await login(item.app);
+    const send = (audio: string) => request(item.app).post("/api/transcribe").set("Cookie", cookie).field("clientId", "reloaded_client").field("sequence", "0").field("durationMs", "1000").field("profile", "de-general").field("previous", "").attach("audio", Buffer.from(audio), { filename: "test.webm", contentType: "audio/webm" });
+    const first = await send("first audio").expect(200), second = await send("different audio").expect(200);
+    expect(first.body.duplicate).toBe(false); expect(second.body.duplicate).toBe(false);
+    expect(item.fetcher).toHaveBeenCalledTimes(2); item.store.close();
+  });
+
   it("enforces the 4 MB audio ceiling", async () => {
     const item = fixture(); const cookie = await login(item.app);
     await request(item.app).post("/api/transcribe").set("Cookie", cookie).field("clientId", "client_123456").field("sequence", "2").field("durationMs", "1000").field("profile", "de-general").attach("audio", Buffer.alloc(4 * 1024 * 1024 + 1), { filename: "large.webm", contentType: "audio/webm" }).expect(413);

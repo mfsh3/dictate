@@ -12,7 +12,9 @@ const DEFAULT_SETTINGS: Settings = { profile: "de-general", dictionary: "", radi
 const EMPTY_USAGE: Usage = { month: "", audioSeconds: 0, lunaInputTokens: 0, lunaCachedTokens: 0, lunaOutputTokens: 0, audioCost: 0, lunaCost: 0 };
 const FONT_SIZE_KEY = "dictate_editor_font_size";
 const MIN_FONT_SIZE = 13, MAX_FONT_SIZE = 25, DEFAULT_FONT_SIZE = 17;
-const clientId = (() => { const found = sessionStorage.getItem("dictate_client_id"); const value = found ?? crypto.randomUUID().replaceAll("-", ""); sessionStorage.setItem("dictate_client_id", value); return value; })();
+// A page reload loses its in-memory sequence counter and queue. Give every page
+// instance a fresh id so sequence 0 can never address an earlier page's request.
+const clientId = crypto.randomUUID().replaceAll("-", "");
 
 function titleFor(text: string) { return text.trim().split("\n")[0]?.slice(0, 70) || "Neues Diktat"; }
 function money(value: number) { return `$${value.toFixed(value < 0.01 ? 4 : 2)}`; }
