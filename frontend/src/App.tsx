@@ -159,7 +159,7 @@ export default function App() {
     </header>
     <main className={view === "dashboard" ? "dashboard-main" : ""}>
       {view === "dashboard" ? <Dashboard refreshKey={usage.audioSeconds + usage.lunaInputTokens + usage.lunaOutputTokens + history.length} /> : <>
-      <section className="workspace">
+      <section className={`workspace ${recording ? "live-recording" : ""}`}>
         <div className="toolbar">
           <select value={settings.profile} onChange={(event) => changeProfile(event.target.value as Profile)} disabled={recording} aria-label="Diktatprofil">
             <option value="de-general">DE · Alltag</option><option value="en-general">EN · Everyday</option><option value="de-radiology">DE · Radiologie</option>
