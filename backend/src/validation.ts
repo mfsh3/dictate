@@ -14,3 +14,4 @@ export const transcribeFieldsSchema = z.object({
   clientId: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/), sequence: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   durationMs: z.coerce.number().min(300).max(91_000), profile: z.enum(["de-general", "en-general", "de-radiology"]), previous: z.string().max(300).default("")
 });
+export const dashboardQuerySchema = z.object({ days: z.coerce.number().pipe(z.union([z.literal(7), z.literal(30), z.literal(365)])) });

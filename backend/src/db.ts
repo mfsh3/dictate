@@ -17,6 +17,17 @@ export interface DictateRecord {
   updatedAt: string;
 }
 
+export type DashboardRange = 7 | 30 | 365;
+
+export interface DashboardPoint {
+  period: string;
+  dictates: number;
+  audioSeconds: number;
+  audioCost: number;
+  lunaCost: number;
+  totalCost: number;
+}
+
 const DEFAULT_SETTINGS: Settings = { profile: "de-general", dictionary: "", radiologyPack: true };
 
 export class Store {
@@ -62,7 +73,31 @@ export class Store {
         luna_output_tokens INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY(user_id, month)
       );
+      CREATE TABLE IF NOT EXISTS usage_daily (
+        user_id TEXT NOT NULL,
+        day TEXT NOT NULL,
+        audio_seconds REAL NOT NULL DEFAULT 0,
+        luna_input_tokens INTEGER NOT NULL DEFAULT 0,
+        luna_cached_tokens INTEGER NOT NULL DEFAULT 0,
+        luna_output_tokens INTEGER NOT NULL DEFAULT 0,
+        dictates_created INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(user_id, day)
+      );
+      CREATE TABLE IF NOT EXISTS dictate_counts (
+        user_id TEXT NOT NULL,
+        dictate_id TEXT NOT NULL,
+        day TEXT NOT NULL,
+        PRIMARY KEY(user_id, dictate_id)
+      );
+      CREATE INDEX IF NOT EXISTS dictate_counts_day ON dictate_counts(day);
+      CREATE TABLE IF NOT EXISTS app_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
+    const now = new Date().toISOString();
+    this.db.prepare("INSERT OR IGNORE INTO app_meta(key,value) VALUES('daily_usage_started_at',?)").run(now);
+    this.backfillDictateCounts();
   }
 
   close() { this.db.close(); }
@@ -94,11 +129,17 @@ export class Store {
   }
 
   upsertDictate(userId: string, item: DictateRecord) {
-    this.db.prepare(`INSERT INTO dictates(id,user_id,title_enc,text_enc,created_at,updated_at) VALUES(?,?,?,?,?,?)
-      ON CONFLICT(id) DO UPDATE SET title_enc=excluded.title_enc,text_enc=excluded.text_enc,updated_at=excluded.updated_at
-      WHERE user_id=excluded.user_id AND dictates.updated_at <= excluded.updated_at`).run(
-        item.id, userId, this.vault.encrypt(item.title), this.vault.encrypt(item.text), item.createdAt, item.updatedAt
-      );
+    this.db.transaction(() => {
+      this.db.prepare(`INSERT INTO dictates(id,user_id,title_enc,text_enc,created_at,updated_at) VALUES(?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET title_enc=excluded.title_enc,text_enc=excluded.text_enc,updated_at=excluded.updated_at
+        WHERE user_id=excluded.user_id AND dictates.updated_at <= excluded.updated_at`).run(
+          item.id, userId, this.vault.encrypt(item.title), this.vault.encrypt(item.text), item.createdAt, item.updatedAt
+        );
+      if (!item.text.trim()) return;
+      const day = item.createdAt.slice(0, 10);
+      const counted = this.db.prepare("INSERT OR IGNORE INTO dictate_counts(user_id,dictate_id,day) VALUES(?,?,?)").run(userId, item.id, day);
+      if (counted.changes) this.addDailyUsage(userId, day, { dictates: 1 });
+    })();
   }
 
   deleteDictate(userId: string, id: string) {
@@ -107,9 +148,12 @@ export class Store {
 
   cleanup() {
     const dictatesCutoff = new Date(Date.now() - 30 * 86400_000).toISOString();
+    const metricsCutoff = new Date(Date.now() - 400 * 86400_000).toISOString().slice(0, 10);
     const idemCutoff = new Date().toISOString();
     this.db.prepare("DELETE FROM dictates WHERE updated_at < ?").run(dictatesCutoff);
     this.db.prepare("DELETE FROM idempotency WHERE expires_at < ?").run(idemCutoff);
+    this.db.prepare("DELETE FROM usage_daily WHERE day < ?").run(metricsCutoff);
+    this.db.prepare("DELETE FROM dictate_counts WHERE day < ?").run(metricsCutoff);
   }
 
   reserve(userId: string, clientId: string, sequence: number) {
@@ -133,17 +177,25 @@ export class Store {
 
   addAudioUsage(userId: string, seconds: number) {
     const month = new Date().toISOString().slice(0, 7);
-    this.db.prepare(`INSERT INTO usage(user_id,month,audio_seconds) VALUES(?,?,?)
-      ON CONFLICT(user_id,month) DO UPDATE SET audio_seconds=audio_seconds+excluded.audio_seconds`).run(userId, month, seconds);
+    const day = new Date().toISOString().slice(0, 10);
+    this.db.transaction(() => {
+      this.db.prepare(`INSERT INTO usage(user_id,month,audio_seconds) VALUES(?,?,?)
+        ON CONFLICT(user_id,month) DO UPDATE SET audio_seconds=audio_seconds+excluded.audio_seconds`).run(userId, month, seconds);
+      this.addDailyUsage(userId, day, { audioSeconds: seconds });
+    })();
   }
 
   addLunaUsage(userId: string, input: number, cached: number, output: number) {
     const month = new Date().toISOString().slice(0, 7);
-    this.db.prepare(`INSERT INTO usage(user_id,month,luna_input_tokens,luna_cached_tokens,luna_output_tokens) VALUES(?,?,?,?,?)
-      ON CONFLICT(user_id,month) DO UPDATE SET
-        luna_input_tokens=luna_input_tokens+excluded.luna_input_tokens,
-        luna_cached_tokens=luna_cached_tokens+excluded.luna_cached_tokens,
-        luna_output_tokens=luna_output_tokens+excluded.luna_output_tokens`).run(userId, month, input, cached, output);
+    const day = new Date().toISOString().slice(0, 10);
+    this.db.transaction(() => {
+      this.db.prepare(`INSERT INTO usage(user_id,month,luna_input_tokens,luna_cached_tokens,luna_output_tokens) VALUES(?,?,?,?,?)
+        ON CONFLICT(user_id,month) DO UPDATE SET
+          luna_input_tokens=luna_input_tokens+excluded.luna_input_tokens,
+          luna_cached_tokens=luna_cached_tokens+excluded.luna_cached_tokens,
+          luna_output_tokens=luna_output_tokens+excluded.luna_output_tokens`).run(userId, month, input, cached, output);
+      this.addDailyUsage(userId, day, { input, cached, output });
+    })();
   }
 
   usage(userId: string) {
@@ -154,5 +206,73 @@ export class Store {
     return { month, audioSeconds, lunaInputTokens: input, lunaCachedTokens: cached, lunaOutputTokens: output,
       audioCost: audioSeconds / 60 * 0.0045,
       lunaCost: (input - cached) * 0.2 / 1e6 + cached * 0.02 / 1e6 + output * 1.2 / 1e6 };
+  }
+
+  dashboard(userId: string, days: DashboardRange) {
+    const today = new Date();
+    const end = today.toISOString().slice(0, 10);
+    const startDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - days + 1));
+    const start = startDate.toISOString().slice(0, 10);
+    const rows = this.db.prepare(`SELECT day,audio_seconds,luna_input_tokens,luna_cached_tokens,luna_output_tokens,dictates_created
+      FROM usage_daily WHERE user_id=? AND day BETWEEN ? AND ? ORDER BY day`).all(userId, start, end) as Array<Record<string, number | string>>;
+    const byDay = new Map(rows.map((row) => [String(row.day), row]));
+    const daily: DashboardPoint[] = [];
+    for (let offset = 0; offset < days; offset++) {
+      const date = new Date(startDate); date.setUTCDate(date.getUTCDate() + offset);
+      const day = date.toISOString().slice(0, 10), row = byDay.get(day);
+      daily.push(this.dashboardPoint(day, row));
+    }
+    const points = days === 365 ? this.groupDashboardMonths(daily) : daily;
+    const summary = daily.reduce((total, point) => ({
+      dictates: total.dictates + point.dictates,
+      audioSeconds: total.audioSeconds + point.audioSeconds,
+      audioCost: total.audioCost + point.audioCost,
+      lunaCost: total.lunaCost + point.lunaCost,
+      totalCost: total.totalCost + point.totalCost
+    }), { dictates: 0, audioSeconds: 0, audioCost: 0, lunaCost: 0, totalCost: 0 });
+    const meta = this.db.prepare("SELECT value FROM app_meta WHERE key='daily_usage_started_at'").get() as { value: string };
+    return { days, bucket: days === 365 ? "month" as const : "day" as const, costTrackingSince: meta.value, summary, points };
+  }
+
+  private addDailyUsage(userId: string, day: string, values: { audioSeconds?: number; input?: number; cached?: number; output?: number; dictates?: number }) {
+    this.db.prepare(`INSERT INTO usage_daily(user_id,day,audio_seconds,luna_input_tokens,luna_cached_tokens,luna_output_tokens,dictates_created)
+      VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,day) DO UPDATE SET
+        audio_seconds=audio_seconds+excluded.audio_seconds,
+        luna_input_tokens=luna_input_tokens+excluded.luna_input_tokens,
+        luna_cached_tokens=luna_cached_tokens+excluded.luna_cached_tokens,
+        luna_output_tokens=luna_output_tokens+excluded.luna_output_tokens,
+        dictates_created=dictates_created+excluded.dictates_created`).run(
+          userId, day, values.audioSeconds ?? 0, values.input ?? 0, values.cached ?? 0, values.output ?? 0, values.dictates ?? 0
+        );
+  }
+
+  private dashboardPoint(period: string, row?: Record<string, number | string>): DashboardPoint {
+    const audioSeconds = Number(row?.audio_seconds ?? 0);
+    const input = Number(row?.luna_input_tokens ?? 0), cached = Math.min(input, Number(row?.luna_cached_tokens ?? 0)), output = Number(row?.luna_output_tokens ?? 0);
+    const audioCost = audioSeconds / 60 * 0.0045;
+    const lunaCost = (input - cached) * 0.2 / 1e6 + cached * 0.02 / 1e6 + output * 1.2 / 1e6;
+    return { period, dictates: Number(row?.dictates_created ?? 0), audioSeconds, audioCost, lunaCost, totalCost: audioCost + lunaCost };
+  }
+
+  private groupDashboardMonths(daily: DashboardPoint[]) {
+    const grouped = new Map<string, DashboardPoint>();
+    for (const point of daily) {
+      const period = point.period.slice(0, 7), found = grouped.get(period) ?? { period, dictates: 0, audioSeconds: 0, audioCost: 0, lunaCost: 0, totalCost: 0 };
+      found.dictates += point.dictates; found.audioSeconds += point.audioSeconds; found.audioCost += point.audioCost;
+      found.lunaCost += point.lunaCost; found.totalCost += point.totalCost; grouped.set(period, found);
+    }
+    return [...grouped.values()];
+  }
+
+  private backfillDictateCounts() {
+    if (this.db.prepare("SELECT 1 FROM app_meta WHERE key='dictate_counts_backfill_v1'").get()) return;
+    this.db.transaction(() => {
+      this.db.prepare(`INSERT OR IGNORE INTO dictate_counts(user_id,dictate_id,day)
+        SELECT user_id,id,substr(created_at,1,10) FROM dictates`).run();
+      this.db.prepare(`INSERT INTO usage_daily(user_id,day,dictates_created)
+        SELECT user_id,day,count(*) FROM dictate_counts GROUP BY user_id,day
+        ON CONFLICT(user_id,day) DO UPDATE SET dictates_created=excluded.dictates_created`).run();
+      this.db.prepare("INSERT INTO app_meta(key,value) VALUES('dictate_counts_backfill_v1',?)").run(new Date().toISOString());
+    })();
   }
 }

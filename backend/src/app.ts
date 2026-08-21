@@ -10,7 +10,7 @@ import { AuthService } from "./auth.js";
 import { Store } from "./db.js";
 import { OpenAIError, OpenAIService } from "./openai.js";
 import { parseDictionary } from "./prompts.js";
-import { dictateSchema, loginSchema, reviewSchema, settingsSchema, transcribeFieldsSchema } from "./validation.js";
+import { dashboardQuerySchema, dictateSchema, loginSchema, reviewSchema, settingsSchema, transcribeFieldsSchema } from "./validation.js";
 
 export interface Dependencies { config: Config; store: Store; auth: AuthService; openai: OpenAIService }
 
@@ -74,6 +74,10 @@ export function createApp({ config, store, auth, openai }: Dependencies) {
   });
 
   app.get("/api/usage", (request, response) => response.json(store.usage((request as AuthedRequest).user!.id)));
+  app.get("/api/dashboard", route((request, response) => {
+    const { days } = dashboardQuerySchema.parse(request.query);
+    response.json(store.dashboard((request as AuthedRequest).user!.id, days));
+  }));
 
   app.post("/api/transcribe", upload.single("audio"), route(async (request, response) => {
     const userId = (request as AuthedRequest).user!.id;

@@ -13,7 +13,7 @@ import { parseDictionary } from "../src/prompts.js";
 import { prepareState } from "../src/security.js";
 
 const dirs: string[] = [];
-afterEach(() => { while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true }); });
+afterEach(() => { vi.useRealTimers(); while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true }); });
 
 function fixture(fetcher: typeof fetch = vi.fn(async (url: string | URL | Request) => {
   if (String(url).includes("audio/transcriptions")) return new Response(JSON.stringify({ text: "Testtranskript." }), { status: 200, headers: { "content-type": "application/json" } });
@@ -58,6 +58,15 @@ describe("security and persistence", () => {
     const old = new Date(Date.now() - 31 * 86400_000).toISOString();
     item.store.upsertDictate("user", { id: crypto.randomUUID(), title: "Alt", text: "Alt", createdAt: old, updatedAt: old });
     expect(item.store.listDictates("user")).toHaveLength(1); item.store.cleanup(); expect(item.store.listDictates("user")).toHaveLength(0); item.store.close();
+  });
+
+  it("removes daily aggregates after the 400 day statistics window", () => {
+    const item = fixture(); item.store.ensureUser("user");
+    const old = new Date(Date.now() - 401 * 86400_000).toISOString().slice(0, 10), today = new Date().toISOString().slice(0, 10);
+    item.store.db.prepare("INSERT INTO usage_daily(user_id,day,audio_seconds) VALUES(?,?,?)").run("user", old, 60);
+    item.store.db.prepare("INSERT INTO usage_daily(user_id,day,audio_seconds) VALUES(?,?,?)").run("user", today, 60);
+    item.store.cleanup();
+    expect((item.store.db.prepare("SELECT count(*) AS count FROM usage_daily").get() as { count: number }).count).toBe(1); item.store.close();
   });
 });
 
@@ -106,5 +115,28 @@ describe("sessions and API", () => {
     const item = fixture(fetcher), cookie = await login(item.app);
     const result = await request(item.app).post("/api/transcribe").set("Cookie", cookie).field("clientId", "client_123456").field("sequence", "8").field("durationMs", "1000").field("profile", "de-general").attach("audio", Buffer.from("audio"), { filename: "test.webm", contentType: "audio/webm" }).expect(502);
     expect(result.body.error.code).toBe("OPENAI_ERROR"); item.store.close();
+  });
+
+  it("returns daily dashboard totals and counts a dictate only once", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date("2026-08-21T12:00:00.000Z"));
+    const item = fixture(), cookie = await login(item.app);
+    const userId = (item.store.db.prepare("SELECT id FROM users LIMIT 1").get() as { id: string }).id;
+    const dictate = { id: crypto.randomUUID(), title: "Befund", text: "Ein Diktat.", createdAt: "2026-08-20T08:00:00.000Z", updatedAt: "2026-08-20T08:00:00.000Z" };
+    await request(item.app).put(`/api/dictates/${dictate.id}`).set("Cookie", cookie).send(dictate).expect(200);
+    await request(item.app).put(`/api/dictates/${dictate.id}`).set("Cookie", cookie).send({ ...dictate, text: "Bearbeitet.", updatedAt: "2026-08-21T09:00:00.000Z" }).expect(200);
+    item.store.addAudioUsage(userId, 120); item.store.addLunaUsage(userId, 1_000_000, 0, 1_000_000);
+    const result = await request(item.app).get("/api/dashboard?days=7").set("Cookie", cookie).expect(200);
+    expect(result.body.bucket).toBe("day"); expect(result.body.points).toHaveLength(7);
+    expect(result.body.summary).toMatchObject({ dictates: 1, audioSeconds: 120 });
+    expect(result.body.summary.audioCost).toBeCloseTo(0.009); expect(result.body.summary.lunaCost).toBeCloseTo(1.4);
+    expect(result.body.costTrackingSince).toBe("2026-08-21T12:00:00.000Z"); item.store.close();
+  });
+
+  it("validates dashboard ranges and groups a year by month", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date("2026-08-21T12:00:00.000Z"));
+    const item = fixture(), cookie = await login(item.app);
+    await request(item.app).get("/api/dashboard?days=14").set("Cookie", cookie).expect(400);
+    const result = await request(item.app).get("/api/dashboard?days=365").set("Cookie", cookie).expect(200);
+    expect(result.body.bucket).toBe("month"); expect(result.body.points[0].period).toMatch(/^2025-/); item.store.close();
   });
 });

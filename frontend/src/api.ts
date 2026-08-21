@@ -1,4 +1,4 @@
-import type { Dictate, Profile, Settings, Usage } from "./types";
+import type { DashboardData, Dictate, Profile, Settings, Usage } from "./types";
 
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
@@ -23,6 +23,7 @@ export const api = {
   saveDictate: (item: Dictate) => request<Dictate>(`/api/dictates/${item.id}`, { method: "PUT", body: JSON.stringify(item) }),
   removeDictate: (id: string) => request<void>(`/api/dictates/${id}`, { method: "DELETE" }),
   usage: () => request<Usage>("/api/usage"),
+  dashboard: (days: 7 | 30 | 365) => request<DashboardData>(`/api/dashboard?days=${days}`),
   transcribe: (input: { blob: Blob; clientId: string; sequence: number; durationMs: number; profile: Profile; previous: string }) => {
     const form = new FormData();
     const ext = input.blob.type.includes("mp4") ? "m4a" : input.blob.type.includes("ogg") ? "ogg" : "webm";
