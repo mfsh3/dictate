@@ -1,0 +1,16 @@
+.git
+.env*
+!.env.example
+node_modules
+**/node_modules
+**/dist
+coverage
+state
+backups
+*.db*
+*.key
+*.pem
+*.log
+docs
+dictate.html
+dictate-mobile.html

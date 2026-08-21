@@ -1,45 +1,104 @@
-# 🎙 Dictate
+# Dictate MVP
 
-**Whisper Speech-to-Text** — Browser-basiert, keine Installation, keine Abhängigkeiten.
+Dictate ist ein browserbasiertes Blockdiktat für DE Alltag, EN Alltag und DE Radiologie. Der MVP besteht aus einem React/Vite-Frontend hinter Nginx und einem internen Express/TypeScript-Backend mit SQLite. OpenAI-Zugangsdaten befinden sich ausschließlich im Backend.
 
-Zwei Varianten: **Desktop** (Always-on-top Popup) und **Mobile** (iOS PWA).
+Die früheren statischen Dateien `dictate.html` und `dictate-mobile.html` bleiben als GitHub-Pages-Legacy-Version erhalten und sind nicht Teil des Docker-Stacks.
 
-## Desktop
+## Enthalten
 
-1. `dictate.html` in **Chrome oder Edge** öffnen
-2. OpenAI API Key eingeben, Sprache wählen
-3. **"Dictate starten"** → schwebendes Always-on-top Popup
-4. **Space** → diktieren → **Space** → Text wird transkribiert + auto-kopiert
-5. **Ctrl+V** in der Ziel-App
+- Push-to-talk per Leertaste sowie klickbarer Aufnahmebutton
+- WebM/Opus mit 64 kbit/s, 90-Sekunden-Rollover und 60-Sekunden-Sicherheitsstopp
+- geordnete Audio-Queue mit Idempotenz, Retry und lokalem Blob-Download
+- Re-Login-Overlay bei Sitzungsverlust ohne Verlust des React-Zustands
+- persönliches Wörterbuch (`Begriff` oder `gehört => Schreibweise`) und Radiologie-Grundpaket
+- editierbarer Text, verschlüsselter 30-Tage-Verlauf, manuelles und Best-Effort-Auto-Copy
+- PiP-Steuerung in unterstützten Chromium-Browsern
+- manuelle Luna-Überarbeitung mit Original/Vorschau und Übernehmen/Verwerfen
+- geschätzte Transcribe- sowie anhand der API-Nutzung berechnete Luna-Kosten
 
-## Mobile (iOS)
+Nicht enthalten sind Realtime-Transkription, Mobile-Support, globale Betriebssystem-Hotkeys, Prisma, Admin-UI und Backups.
 
-1. **[dictate-mobile.html](https://mfsh3.github.io/dictate/dictate-mobile.html)** in Safari öffnen
-2. Share → **"Zum Home-Bildschirm"** (einmalig)
-3. App öffnen, API Key eingeben
-4. Record-Button tippen → sprechen → Stop tippen
-5. **"Kopieren"** tippen → in Ziel-App wechseln → Einfügen
+## Lokale Entwicklung
 
-## Features
+Voraussetzung ist Node.js 22 oder neuer.
 
-- 🎤 Aufnahme via Browser-Mikrofon (MediaRecorder API)
-- 🧠 Transkription über OpenAI Whisper API
-- 📋 Clipboard-Integration (Desktop: auto, Mobile: ein Tap)
-- 💰 Kostentracking (Session / Tag / Gesamt)
-- ⚙️ Inline-Einstellungen
-- 🌙 "Sonic Architect" Design (Dark Mode)
+```bash
+npm install
+cp .env.example .env
+install -d -m 0700 /tmp/dictate-state
+```
 
-## Warum?
+Danach in `.env` `STATE_DIR=/tmp/dictate-state`, `AUTH_MODE=mock` und einen `OPENAI_API_KEY` konfigurieren. Das Secure-Session-Cookie verlangt auch in der Browserentwicklung HTTPS; API-Tests funktionieren ohne Browser-Cookie-Ausnahme.
 
-Gebaut für Arbeitsrechner auf denen man keine Software installieren kann — kein .exe, kein Installer, keine Admin-Rechte nötig. Nur ein Browser.
+```bash
+npm run dev:backend
+npm run dev:frontend
+```
 
-## Voraussetzungen
+Mock-Zugangsdaten kommen aus `MOCK_ADMIN_EMAIL` und `MOCK_ADMIN_PASSWORD`. `AUTH_MODE=mock` wird bei `NODE_ENV=production` abgelehnt.
 
-**Desktop:** Chrome/Edge 116+ (Picture-in-Picture)
-**Mobile:** iOS 14.3+ (MediaRecorder), Safari
+## Tests und OpenAI-Contract-Smoke
 
-Beide: OpenAI API Key ([platform.openai.com](https://platform.openai.com)) + Mikrofon
+```bash
+npm run typecheck
+npm test
+npm run build
+```
 
-## Kosten
+Der echte OpenAI-Smoke läuft bewusst nie in CI und liest nicht den normalen Deployment-Key. Er benötigt einen expliziten Dev-Test-Key und eine anonymisierte Audiodatei:
 
-Whisper API: **$0.006 pro Minute** Audioaufnahme. Eine Stunde Diktieren kostet ~$0.36.
+```bash
+OPENAI_DEV_TEST_KEY=... OPENAI_TEST_AUDIO=/absolute/anonymized.wav npm run contract:smoke
+```
+
+Geprüft werden `gpt-transcribe` mit `languages[]`, `keywords[]` und `prompt` sowie `gpt-5.6-luna` über `/v1/responses` mit `reasoning.effort: none`, `store: false` und `max_output_tokens: 8192`.
+
+## State und Berechtigungen
+
+Der Dev-Stack erwartet:
+
+```text
+/opt/dictate-state/dev/
+├── dictate.db          0600 (wird angelegt)
+├── data.key            0600 (wird angelegt)
+└── radsup-dev-ca.pem   0644 oder strenger
+```
+
+Das Verzeichnis muss `0700` besitzen. Das Backend verweigert den Start bei abweichenden DB-/Schlüsselrechten und auch dann, wenn eine vorhandene Datenbank ihren Schlüssel verloren hat. Text, Titel und Wörterbuch sind mit AES-256-GCM verschlüsselt. Es gibt absichtlich weder Schlüsselrotation noch Backup oder Recovery. Diktate älter als 30 Tage werden beim Start und danach täglich physisch entfernt.
+
+Audio liegt nur im Browserzustand und im Multipart-Memory-Storage. Es wird nie in SQLite oder ein Upload-Verzeichnis geschrieben. Der Proxy streamt `/api/transcribe` ohne Request-Buffering und begrenzt den Request auf 4 MB.
+
+## RadsUp-Dev-Anmeldung
+
+Das Ziel `https://radsup.bj7r2d.de/api/auth/login` ist im Konfigurationsschema fest verdrahtet. Der eigene HTTPS-Client vertraut ausschließlich der Datei `RADSUP_CA_PATH`; `rejectUnauthorized` bleibt aktiv. RadsUp-Cookies werden ignoriert. Nach erfolgreicher Antwort wird ausschließlich `user.role === "ADMIN"` akzeptiert und eine acht Stunden gültige In-Memory-Sitzung erzeugt.
+
+`dictate_sid` ist `HttpOnly`, `Secure`, `SameSite=Strict` und host-only. Ein Backend-Neustart widerruft alle Sitzungen. Loginversuche sind auf zwei je Client-IP und vier RadsUp-Aufrufe global pro Minute begrenzt. Der vorgeschaltete Nginx setzt dafür intern `X-Client-IP`; dieser Header wird nie an RadsUp weitergereicht.
+
+Vor dem Umschalten von Mock auf RadsUp müssen Admin-/Nicht-Admin, falsches/abgelaufenes/geändertes Zertifikat und Ausfall mit der realen Dev-Instanz geprüft werden.
+
+## Deployment
+
+1. Das OpenAI-Dev-Projekt extern auf ein hartes Monatslimit von 25 USD setzen.
+2. `/opt/dictate-state/dev` mit Eigentümer des Container-Users und Modus `0700` vorbereiten.
+3. das aktuelle RadsUp-Dev-CA-/Self-Signed-Zertifikat als `radsup-dev-ca.pem` ablegen.
+4. `.env` aus `.env.example` erstellen, `AUTH_MODE=radsup` und den Dev-OpenAI-Key setzen.
+5. das externe Docker-Netz `edge_net` muss bereits existieren und Nginx Proxy Manager enthalten.
+6. `docker compose build` und `docker compose up -d` verwenden — nicht `docker compose down`.
+7. NPM auf `dictate_frontend:8080` zeigen lassen und den Inhalt von `deploy/npm-proxy-host-advanced.conf` übernehmen.
+
+Nur das Frontend hängt an `edge_net`; das Backend hat keine veröffentlichten Ports, besitzt über sein Compose-Netz aber den nötigen ausgehenden Zugriff auf RadsUp und OpenAI.
+
+Nach Infrastrukturänderungen sind Dictate, RadsUp und Kasm zu prüfen. Ein Wechsel zu RadsUp-Prod bleibt eine getrennte Freigabe mit eigenem Stack, Schlüssel und OpenAI-Projekt.
+
+## Manuelle Abnahme
+
+- Admin-/Nicht-Admin-Login, RadsUp-Zertifikatfehler und RadsUp-Ausfall
+- Sitzungsauslauf/Backend-Neustart während Aufnahme und Queue, danach Re-Login
+- Leertaste halten/loslassen, Texteingabefokus, Button-Toggle, Escape und Mikrofonverlust
+- 90-Sekunden-Rollover, 60-Sekunden-Stille, Queue-Reihenfolge, Retry und Idempotenz
+- Projektlimit mitten in einer Queue; Blob bleibt download- und retryfähig
+- Clipboard-Erfolg sowie erwarteter `NotAllowedError`
+- maximal gültiger Upload ohne Nginx-Tempfile
+- mehrere anonymisierte reale DE-, EN- und Radiologieläufe auf `dictate.radsup.de`
+
+Die automatischen Tests decken Verschlüsselung, Rechte, Wörterbuch, Session-Neustart, Uploadlimit, Idempotenz, Queue-Reihenfolge und Kostenfelder ab. Externe TLS-, Browser-, NPM- und echte Modelltests bleiben bewusst Teil der manuellen Dev-Abnahme.

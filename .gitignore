@@ -3,6 +3,7 @@
 node_modules/
 dist/
 coverage/
+*.tsbuildinfo
 *.db
 *.db-wal
 *.db-shm
